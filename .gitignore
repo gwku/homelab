@@ -1,0 +1,36 @@
+# OpenTofu / Terraform
+*.tfstate
+*.tfstate.*
+*.tfvars
+*.tfvars.json
+.terraform/
+.tofu/
+.terraform.lock.hcl
+.tofu.lock.hcl
+crash.log
+crash.*.log
+
+# Allow example config
+!terraform.example.tfvars
+
+# OS
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Local environment files
+.env
+.env.local
+.env.production.local
+.env.*.local 
