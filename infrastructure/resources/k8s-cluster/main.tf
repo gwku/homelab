@@ -94,11 +94,10 @@ resource "proxmox_vm_qemu" "k8s_nodes" {
     type = "socket"
   }
 
-  ipconfig0 = "ip=${var.ip_prefix}.${var.ip_start + each.value.type_index + (each.value.vm_type == "worker" ? var.vms.master.count : 0)}/24,gw=${var.ip_prefix}.1"
+  ipconfig0 = "ip=${var.ip_prefix}.${var.ip_start + each.value.type_index + (each.value.vm_type == "worker" ? var.vms.master.count : 0)}/24,gw=${var.gateway}"
 
   ciuser     = var.ciuser
   cipassword = var.cipassword
-  ciupgrade = true
   sshkeys    = var.ssh_keys
 
   tags = each.value.vm_type

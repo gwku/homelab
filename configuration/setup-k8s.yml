@@ -1,0 +1,387 @@
+---
+- name: Prepare all nodes
+  hosts: all
+  become: yes
+  vars_files:
+    - vars.yml
+  tasks:
+    - name: Update and upgrade apt packages
+      apt:
+        upgrade: dist
+        update_cache: yes
+        cache_valid_time: 3600
+
+    - name: Check if swap is enabled
+      shell: swapon --show
+      register: swap_status
+      ignore_errors: yes
+      changed_when: false
+
+    - name: Disable swap
+      shell: swapoff -a
+      when: swap_status.stdout != ""
+
+    - name: Check for uncommented swap entries in fstab
+      shell: grep -E '^[^#]*\s+swap\s+' /etc/fstab || echo "no_swap_found"
+      register: fstab_swap_check
+      changed_when: false
+
+    - name: Comment out swap entries in fstab
+      shell: sed -i '/ swap / s/^/#/' /etc/fstab
+      when: fstab_swap_check.stdout != "no_swap_found" and fstab_swap_check.stdout != ""
+
+    - name: Check if overlay module is loaded
+      shell: lsmod | grep overlay
+      register: overlay_loaded
+      ignore_errors: yes
+      changed_when: false
+
+    - name: Check if br_netfilter module is loaded
+      shell: lsmod | grep br_netfilter
+      register: br_netfilter_loaded
+      ignore_errors: yes
+      changed_when: false
+
+    - name: Load overlay kernel module
+      shell: modprobe overlay
+      when: overlay_loaded.rc != 0
+
+    - name: Load br_netfilter kernel module
+      shell: modprobe br_netfilter
+      when: br_netfilter_loaded.rc != 0
+
+    - name: Ensure kernel modules load at boot
+      copy:
+        dest: /etc/modules-load.d/kubernetes.conf
+        content: |
+          overlay
+          br_netfilter
+        mode: '0644'
+
+    - name: Set sysctl params for Kubernetes
+      copy:
+        dest: /etc/sysctl.d/kubernetes.conf
+        content: |
+          net.bridge.bridge-nf-call-ip6tables = 1
+          net.bridge.bridge-nf-call-iptables = 1
+          net.ipv4.ip_forward = 1
+        mode: '0644'
+      register: sysctl_config_changed
+
+    - name: Apply sysctl params
+      command: sysctl --system
+      when: sysctl_config_changed.changed
+
+    - name: Configure /etc/hosts for cluster nodes
+      blockinfile:
+        path: /etc/hosts
+        block: |
+          # Kubernetes cluster nodes
+          {% for host in groups['masters'] | default([]) %}
+          {{ hostvars[host]['ansible_default_ipv4']['address'] }} {{ host }}
+          {% endfor %}
+          {% for host in groups['workers'] | default([]) %}
+          {{ hostvars[host]['ansible_default_ipv4']['address'] }} {{ host }}
+          {% endfor %}
+        marker: "# {mark} ANSIBLE MANAGED KUBERNETES CLUSTER HOSTS"
+        create: yes
+        backup: yes
+
+    - name: Install dependencies
+      apt:
+        name:
+          - apt-transport-https
+          - ca-certificates
+          - curl
+          - gnupg
+          - lsb-release
+        state: present
+        update_cache: yes
+
+    - name: Get distribution codename
+      shell: . /etc/os-release && echo "$VERSION_CODENAME"
+      register: distro_codename
+      changed_when: false
+
+    - name: Add Docker GPG key
+      ansible.builtin.apt_key:
+        url: https://download.docker.com/linux/debian/gpg
+        state: present
+
+    - name: Add Docker repository
+      ansible.builtin.apt_repository:
+        repo: "deb [arch=amd64] https://download.docker.com/linux/debian {{ distro_codename.stdout }} stable"
+        state: present
+        filename: docker
+
+    - name: Install containerd
+      apt:
+        name: containerd.io
+        state: present
+        update_cache: yes
+
+    - name: Check if containerd is already configured
+      stat:
+        path: /etc/containerd/config.toml
+      register: containerd_config_exists
+
+    - name: Check if containerd SystemdCgroup is enabled
+      shell: grep "SystemdCgroup = true" /etc/containerd/config.toml
+      register: containerd_systemd_check
+      ignore_errors: yes
+      changed_when: false
+      when: containerd_config_exists.stat.exists
+
+    - name: Create containerd config directory
+      file:
+        path: /etc/containerd
+        state: directory
+        mode: '0755'
+      when: not containerd_config_exists.stat.exists
+
+    - name: Generate default containerd config
+      shell: containerd config default > /etc/containerd/config.toml
+      when: not containerd_config_exists.stat.exists
+
+    - name: Enable SystemdCgroup in containerd config
+      shell: sed -i 's/SystemdCgroup = false/SystemdCgroup = true/' /etc/containerd/config.toml
+      when: not containerd_config_exists.stat.exists or (containerd_config_exists.stat.exists and containerd_systemd_check.rc != 0)
+      register: containerd_config_updated
+
+    - name: Restart and enable containerd
+      systemd:
+        name: containerd
+        state: restarted
+        enabled: yes
+      when: containerd_config_updated.changed or not containerd_config_exists.stat.exists
+
+    - name: Check if Kubernetes repository is already configured
+      stat:
+        path: /etc/apt/sources.list.d/kubernetes.list
+      register: k8s_repo_exists
+
+    - name: Check if Kubernetes GPG key exists
+      stat:
+        path: /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+      register: k8s_gpg_exists
+
+    - name: Create keyrings directory
+      file:
+        path: /etc/apt/keyrings
+        state: directory
+        mode: '0755'
+      when: not k8s_gpg_exists.stat.exists
+
+    - name: Add Kubernetes GPG key
+      shell: curl -fsSL https://pkgs.k8s.io/core:/stable:/v1.30/deb/Release.key | gpg --dearmor -o /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+      when: not k8s_gpg_exists.stat.exists
+
+    - name: Set permissions on Kubernetes GPG key
+      file:
+        path: /etc/apt/keyrings/kubernetes-apt-keyring.gpg
+        mode: '0644'
+      when: not k8s_gpg_exists.stat.exists
+
+    - name: Add Kubernetes repository
+      copy:
+        dest: /etc/apt/sources.list.d/kubernetes.list
+        content: 'deb [signed-by=/etc/apt/keyrings/kubernetes-apt-keyring.gpg] https://pkgs.k8s.io/core:/stable:/v1.30/deb/ /'
+        mode: '0644'
+      when: not k8s_repo_exists.stat.exists
+
+    - name: Install Kubernetes components
+      apt:
+        name:
+          - kubelet
+          - kubeadm
+          - kubectl
+        state: present
+        update_cache: yes
+
+    - name: Check if kubelet is held
+      ansible.builtin.shell: "apt-mark showhold | grep -w kubelet"
+      register: kubelet_held
+      ignore_errors: yes
+
+    - name: Hold kubelet, kubeadm, and kubectl packages
+      ansible.builtin.command:
+        cmd: "apt-mark hold kubelet kubeadm kubectl"
+      when: kubelet_held.rc != 0
+
+- name: Initialize primary master node
+  hosts: masters[0]
+  become: yes
+  vars_files:
+    - vars.yml
+  tasks:
+    - name: Initialize Kubernetes master
+      shell: |
+        kubeadm init \
+        --control-plane-endpoint={{ cluster_endpoint }} \
+        --pod-network-cidr={{ pod_network_cidr }} \
+        --cri-socket=unix:///run/containerd/containerd.sock
+      args:
+        creates: /etc/kubernetes/admin.conf
+
+    - name: Check if kubeconfig exists for user
+      stat:
+        path: /home/debian/.kube/config
+      register: user_kubeconfig_exists
+      become_user: debian
+
+    - name: Copy kubeconfig to user
+      become_user: debian
+      shell: |
+        mkdir -p $HOME/.kube
+        sudo cp /etc/kubernetes/admin.conf $HOME/.kube/config
+        sudo chown $(id -u):$(id -g) $HOME/.kube/config
+      when: not user_kubeconfig_exists.stat.exists
+
+    - name: Check if join command file exists
+      stat:
+        path: /join-command.sh
+      register: join_command_file_exists
+
+    - name: Generate and save join command
+      block:
+        - name: Save join command
+          shell: |
+            kubeadm token create --print-join-command --ttl 30m
+          register: join_cmd
+          changed_when: false
+
+        - name: Save join command to file
+          copy:
+            dest: /join-command.sh
+            content: |
+              #!/bin/bash
+              {{ join_cmd.stdout }}
+            mode: '0755'
+      when: not join_command_file_exists.stat.exists
+
+- name: Install Calico CNI
+  hosts: masters[0]
+  become_user: debian
+  vars_files:
+    - vars.yml
+  tasks:
+    - name: Check if Calico is already installed
+      shell: kubectl get namespace tigera-operator
+      environment:
+        KUBECONFIG: /home/debian/.kube/config
+      register: calico_namespace_check
+      ignore_errors: yes
+      changed_when: false
+
+    - name: Install Tigera operator and custom resource definitions
+      shell: |
+        kubectl create -f https://raw.githubusercontent.com/projectcalico/calico/v3.30.2/manifests/operator-crds.yaml
+        kubectl create -f https://raw.githubusercontent.com/projectcalico/calico/v3.30.2/manifests/tigera-operator.yaml
+      environment:
+        KUBECONFIG: /home/debian/.kube/config
+      when: calico_namespace_check.rc != 0
+
+    - name: Download Calico custom resources
+      get_url:
+        url: https://raw.githubusercontent.com/projectcalico/calico/v3.30.2/manifests/custom-resources.yaml
+        dest: /tmp/custom-resources-original.yaml
+        mode: '0644'
+      when: calico_namespace_check.rc != 0
+
+    - name: Update CIDR in Calico custom resources
+      shell: |
+        sed 's|192.168.0.0/16|{{ pod_network_cidr }}|g' /tmp/custom-resources-original.yaml > /tmp/custom-resources.yaml
+      args:
+        creates: /tmp/custom-resources.yaml
+      when: calico_namespace_check.rc != 0
+
+    - name: Apply Calico custom resources
+      shell: kubectl create -f /tmp/custom-resources.yaml
+      environment:
+        KUBECONFIG: /home/debian/.kube/config
+      when: calico_namespace_check.rc != 0
+
+    - name: Wait for Calico pods to be ready
+      shell: kubectl wait --for=condition=Ready pods --all -n calico-system --timeout=300s
+      environment:
+        KUBECONFIG: /home/debian/.kube/config
+      retries: 30
+      delay: 10
+      register: calico_ready
+      until: calico_ready.rc == 0
+
+    - name: Verify Calico installation
+      shell: kubectl get pods -n calico-system
+      environment:
+        KUBECONFIG: /home/debian/.kube/config
+      register: calico_pods
+
+    - name: Display Calico pods status
+      debug:
+        var: calico_pods.stdout_lines
+
+- name: Join additional masters
+  hosts: masters[1:]
+  become: yes
+  vars_files:
+    - vars.yml
+  tasks:
+    - name: Check if node is already part of the cluster
+      stat:
+        path: /etc/kubernetes/kubelet.conf
+      register: kubelet_conf_exists
+
+    - name: Read join command from primary master
+      slurp:
+        src: /join-command.sh
+      register: join_command_content
+      delegate_to: "{{ primary_master }}"
+      when: not kubelet_conf_exists.stat.exists
+
+    - name: Copy join command to additional masters
+      copy:
+        dest: /tmp/join-command.sh
+        content: "{{ join_command_content.content | b64decode }}"
+        mode: '0755'
+      when: not kubelet_conf_exists.stat.exists
+
+    - name: Get certificate key from primary master
+      shell: kubeadm init phase upload-certs --upload-certs | tail -1
+      register: cert_key
+      delegate_to: "{{ primary_master }}"
+      become: yes
+      when: not kubelet_conf_exists.stat.exists
+
+    - name: Join master to cluster
+      shell: |
+        bash /tmp/join-command.sh --control-plane --certificate-key {{ cert_key.stdout }}
+      when: not kubelet_conf_exists.stat.exists and groups['masters'] | length > 1
+
+- name: Join worker nodes
+  hosts: workers
+  become: yes
+  vars_files:
+    - vars.yml
+  tasks:
+    - name: Check if worker node is already part of the cluster
+      stat:
+        path: /etc/kubernetes/kubelet.conf
+      register: worker_kubelet_conf_exists
+
+    - name: Read join command from primary master
+      slurp:
+        src: /join-command.sh
+      register: join_command_content
+      delegate_to: "{{ primary_master }}"
+      when: not worker_kubelet_conf_exists.stat.exists
+
+    - name: Copy join command to worker nodes
+      copy:
+        dest: /tmp/join-command.sh
+        content: "{{ join_command_content.content | b64decode }}"
+        mode: '0755'
+      when: not worker_kubelet_conf_exists.stat.exists
+
+    - name: Join worker to cluster
+      shell: bash /tmp/join-command.sh
+      when: not worker_kubelet_conf_exists.stat.exists

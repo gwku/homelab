@@ -1,0 +1,17 @@
+---
+- name: Prepare all nodes
+  hosts: all
+  become: yes
+  vars:
+    kubernetes_version: "1.30.0"
+    pod_network_cidr: "10.244.0.0/16"
+  tasks:
+  - name: Get distribution codename
+    command: lsb_release -cs
+    register: distro_codename
+    changed_when: false
+
+  - name: Remove old Docker repo file
+    file:
+      path: /etc/apt/sources.list.d/kubernetes.list
+      state: absent

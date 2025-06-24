@@ -67,6 +67,11 @@ variable "ip_start" {
   default     = 10
 }
 
+variable "gateway" {
+  description = "Default gateway IP address"
+  type        = string
+}
+
 # Modular VMs configuration
 variable "vms" {
   description = "Configuration for Kubernetes cluster VMs"

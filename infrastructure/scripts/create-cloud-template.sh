@@ -1,15 +1,17 @@
 #!/bin/bash
 
 # Proxmox Cloud Template Creation Script
-# Creates a Debian 12 cloud-init template for Proxmox VE
+# Creates a cloud-init template for Proxmox VE
+# Supports Debian 12 and Ubuntu 24.04 (Noble) images
 # 
 # Required environment variables:
 # - VM_ID: The VM ID to use for the template
 # - ST_VOL: Storage volume name (e.g., 'local-lvm')
 # - PUB_SSHKEY: Path to public SSH key file
-# - SOME_PASSWORD: Password for the debian user
+# - SOME_PASSWORD: Password for the default user
 #
 # Optional environment variables with defaults:
+# - CLOUD_IMAGE_TYPE: Image type - 'debian' or 'ubuntu' (default: 'debian')
 # - VM_MEMORY: Memory in MB (default: 2048)
 # - VM_CORES: Number of CPU cores (default: 4)
 # - VM_DISK_SIZE: Disk size in GB (default: 30)
@@ -17,9 +19,31 @@
 set -euo pipefail  # Exit on error, undefined vars, and pipe failures
 
 # Configuration variables with defaults
-VM_MEMORY=${VM_MEMORY:-2048}      # Memory in MB
-VM_CORES=${VM_CORES:-4}           # CPU cores
-VM_DISK_SIZE=${VM_DISK_SIZE:-30}  # Disk size in GB
+CLOUD_IMAGE_TYPE=${CLOUD_IMAGE_TYPE:-debian}  # Image type: debian or ubuntu
+VM_MEMORY=${VM_MEMORY:-2048}                  # Memory in MB
+VM_CORES=${VM_CORES:-4}                       # CPU cores
+VM_DISK_SIZE=${VM_DISK_SIZE:-30}              # Disk size in GB
+
+# Cloud image configurations
+declare -A IMAGE_CONFIGS
+IMAGE_CONFIGS[debian_url]="https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2"
+IMAGE_CONFIGS[debian_filename]="debian-12-generic-amd64.qcow2"
+IMAGE_CONFIGS[debian_name]="debian12-cloud"
+IMAGE_CONFIGS[debian_display]="Debian 12"
+IMAGE_CONFIGS[debian_format]="qcow2"
+
+IMAGE_CONFIGS[ubuntu_url]="https://cloud-images.ubuntu.com/noble/current/noble-server-cloudimg-amd64.img"
+IMAGE_CONFIGS[ubuntu_filename]="noble-server-cloudimg-amd64.img"
+IMAGE_CONFIGS[ubuntu_name]="ubuntu24-cloud"
+IMAGE_CONFIGS[ubuntu_display]="Ubuntu 24.04 (Noble)"
+IMAGE_CONFIGS[ubuntu_format]="qcow2"
+
+# Set current image configuration based on type
+IMAGE_URL="${IMAGE_CONFIGS[${CLOUD_IMAGE_TYPE}_url]}"
+IMAGE_FILENAME="${IMAGE_CONFIGS[${CLOUD_IMAGE_TYPE}_filename]}"
+VM_NAME="${IMAGE_CONFIGS[${CLOUD_IMAGE_TYPE}_name]}"
+IMAGE_DISPLAY="${IMAGE_CONFIGS[${CLOUD_IMAGE_TYPE}_display]}"
+IMAGE_FORMAT="${IMAGE_CONFIGS[${CLOUD_IMAGE_TYPE}_format]}"
 
 # Color codes for output
 RED='\033[0;31m'
@@ -55,6 +79,12 @@ validate_env() {
         exit 1
     fi
     
+    # Validate cloud image type
+    if [[ "$CLOUD_IMAGE_TYPE" != "debian" && "$CLOUD_IMAGE_TYPE" != "ubuntu" ]]; then
+        log_error "Invalid CLOUD_IMAGE_TYPE: $CLOUD_IMAGE_TYPE. Must be 'debian' or 'ubuntu'"
+        exit 1
+    fi
+    
     # Validate SSH key file exists
     if [[ ! -f "$PUB_SSHKEY" ]]; then
         log_error "SSH public key file not found: $PUB_SSHKEY"
@@ -65,8 +95,8 @@ validate_env() {
 # Cleanup function
 cleanup() {
     log_info "Cleaning up temporary files..."
-    if [[ -f "debian-12-generic-amd64.qcow2" ]]; then
-        rm -f debian-12-generic-amd64.qcow2
+    if [[ -f "$IMAGE_FILENAME" ]]; then
+        rm -f "$IMAGE_FILENAME"
         log_info "Removed downloaded image file"
     fi
 }
@@ -77,6 +107,7 @@ trap cleanup EXIT
 # Main script execution
 main() {
     log_info "Starting Proxmox cloud template creation process..."
+    log_info "Image type: $IMAGE_DISPLAY"
     
     # Validate environment
     validate_env
@@ -90,20 +121,20 @@ main() {
         qm destroy "$VM_ID" || log_warn "Failed to destroy VM $VM_ID (may not exist)"
     fi
     
-    # Download latest Debian 12 cloud image
-    log_info "Downloading latest Debian 12 cloud image..."
-    if [[ -f "debian-12-generic-amd64.qcow2" ]]; then
+    # Download latest cloud image
+    log_info "Downloading latest $IMAGE_DISPLAY cloud image..."
+    if [[ -f "$IMAGE_FILENAME" ]]; then
         log_warn "Image file already exists, removing old version..."
-        rm -f debian-12-generic-amd64.qcow2
+        rm -f "$IMAGE_FILENAME"
     fi
     
     wget -q --show-progress \
-        https://cloud.debian.org/images/cloud/bookworm/latest/debian-12-generic-amd64.qcow2 \
-        -O debian-12-generic-amd64.qcow2
+        "$IMAGE_URL" \
+        -O "$IMAGE_FILENAME"
     
     # Customize the image
     log_info "Customizing cloud image..."
-    virt-customize -a debian-12-generic-amd64.qcow2 \
+    virt-customize -a "$IMAGE_FILENAME" \
         --install qemu-guest-agent \
         --truncate /etc/machine-id \
         --timezone "Europe/Amsterdam" \
@@ -114,7 +145,7 @@ main() {
     # Create VM
     log_info "Creating VM $VM_ID with ${VM_MEMORY}MB RAM and ${VM_CORES} cores..."
     qm create "$VM_ID" \
-        --name debian12-cloud \
+        --name "$VM_NAME" \
         --cpu host \
         --machine q35 \
         --memory "$VM_MEMORY" \
@@ -125,7 +156,7 @@ main() {
     
     # Import disk
     log_info "Importing disk to Proxmox storage..."
-    qm importdisk "$VM_ID" debian-12-generic-amd64.qcow2 "$ST_VOL" -format qcow2
+    qm importdisk "$VM_ID" "$IMAGE_FILENAME" "$ST_VOL" -format "$IMAGE_FORMAT"
     
     # Configure storage and boot
     log_info "Configuring VM storage and boot options..."
@@ -166,7 +197,8 @@ main() {
     
     log_info "Template creation completed successfully!"
     log_info "Template ID: $VM_ID"
-    log_info "Template Name: debian12-cloud"
+    log_info "Template Name: $VM_NAME"
+    log_info "Image Type: $IMAGE_DISPLAY"
     log_info "Configuration: ${VM_MEMORY}MB RAM, ${VM_CORES} cores, ${VM_DISK_SIZE}GB disk"
 }
 

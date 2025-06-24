@@ -17,8 +17,9 @@ ciuser     = "debian"
 cipassword = "your-secure-password"
 
 # Network Configuration
-ip_prefix = "192.168.1"
+ip_prefix = "192.168.2"
 ip_start  = 10
+gateway   = "192.168.2.254"
 
 # SSH Keys for VM access
 ssh_keys = "your-ssh-public-key-here"

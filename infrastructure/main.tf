@@ -20,6 +20,7 @@ module "k8s_cluster" {
   # Network Configuration
   ip_prefix = var.ip_prefix
   ip_start  = var.ip_start
+  gateway   = var.gateway
   
   # Cloud-init Configuration
   ciuser     = var.ciuser
