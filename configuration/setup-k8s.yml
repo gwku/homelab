@@ -30,6 +30,14 @@
       shell: sed -i '/ swap / s/^/#/' /etc/fstab
       when: fstab_swap_check.stdout != "no_swap_found" and fstab_swap_check.stdout != ""
 
+    - name: Comment out update_etc_hosts in cloud.cfg to prevent overwrite
+      lineinfile:
+        path: /etc/cloud/cloud.cfg
+        regexp: '^(\s*)-\s*update_etc_hosts'
+        line: '#\1- update_etc_hosts'
+        backrefs: yes
+      ignore_errors: yes
+
     - name: Check if overlay module is loaded
       shell: lsmod | grep overlay
       register: overlay_loaded
@@ -125,6 +133,13 @@
         path: /etc/containerd/config.toml
       register: containerd_config_exists
 
+    - name: Check if CRI plugin is disabled (problematic config)
+      shell: grep "disabled_plugins.*cri" /etc/containerd/config.toml
+      register: cri_disabled_check
+      ignore_errors: yes
+      changed_when: false
+      when: containerd_config_exists.stat.exists
+
     - name: Check if containerd SystemdCgroup is enabled
       shell: grep "SystemdCgroup = true" /etc/containerd/config.toml
       register: containerd_systemd_check
@@ -137,15 +152,15 @@
         path: /etc/containerd
         state: directory
         mode: '0755'
-      when: not containerd_config_exists.stat.exists
 
-    - name: Generate default containerd config
+    - name: Generate proper containerd config
       shell: containerd config default > /etc/containerd/config.toml
-      when: not containerd_config_exists.stat.exists
+      when: not containerd_config_exists.stat.exists or (containerd_config_exists.stat.exists and cri_disabled_check.rc == 0)
+      register: containerd_config_generated
 
     - name: Enable SystemdCgroup in containerd config
       shell: sed -i 's/SystemdCgroup = false/SystemdCgroup = true/' /etc/containerd/config.toml
-      when: not containerd_config_exists.stat.exists or (containerd_config_exists.stat.exists and containerd_systemd_check.rc != 0)
+      when: containerd_config_generated.changed or (containerd_config_exists.stat.exists and containerd_systemd_check.rc != 0)
       register: containerd_config_updated
 
     - name: Restart and enable containerd
@@ -153,7 +168,7 @@
         name: containerd
         state: restarted
         enabled: yes
-      when: containerd_config_updated.changed or not containerd_config_exists.stat.exists
+      when: containerd_config_generated.changed or containerd_config_updated.changed
 
     - name: Check if Kubernetes repository is already configured
       stat:
@@ -331,30 +346,44 @@
         path: /etc/kubernetes/kubelet.conf
       register: kubelet_conf_exists
 
-    - name: Read join command from primary master
-      slurp:
-        src: /join-command.sh
-      register: join_command_content
-      delegate_to: "{{ primary_master }}"
-      when: not kubelet_conf_exists.stat.exists
-
-    - name: Copy join command to additional masters
-      copy:
-        dest: /tmp/join-command.sh
-        content: "{{ join_command_content.content | b64decode }}"
-        mode: '0755'
-      when: not kubelet_conf_exists.stat.exists
-
-    - name: Get certificate key from primary master
+    - name: Get fresh certificate key from primary master
       shell: kubeadm init phase upload-certs --upload-certs | tail -1
       register: cert_key
       delegate_to: "{{ primary_master }}"
       become: yes
       when: not kubelet_conf_exists.stat.exists
 
-    - name: Join master to cluster
+    - name: Generate control plane join command from primary master
       shell: |
-        bash /tmp/join-command.sh --control-plane --certificate-key {{ cert_key.stdout }}
+        kubeadm token create --print-join-command --ttl 30m
+      register: cp_join_cmd
+      delegate_to: "{{ primary_master }}"
+      become: yes
+      when: not kubelet_conf_exists.stat.exists
+
+    - name: Join master to cluster as control plane
+      shell: |
+        {{ cp_join_cmd.stdout }} --control-plane --certificate-key {{ cert_key.stdout }}
+      when: not kubelet_conf_exists.stat.exists and groups['masters'] | length > 1
+
+    - name: Setup kubeconfig for additional masters
+      block:
+        - name: Create .kube directory for debian user
+          file:
+            path: /home/debian/.kube
+            state: directory
+            owner: debian
+            group: debian
+            mode: '0755'
+
+        - name: Copy admin.conf to debian user
+          copy:
+            src: /etc/kubernetes/admin.conf
+            dest: /home/debian/.kube/config
+            owner: debian
+            group: debian
+            mode: '0644'
+            remote_src: yes
       when: not kubelet_conf_exists.stat.exists and groups['masters'] | length > 1
 
 - name: Join worker nodes

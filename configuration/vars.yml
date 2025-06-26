@@ -1,6 +1,6 @@
 ---
 # Common variables for Kubernetes cluster setup
-kubernetes_version: "1.30"
+kubernetes_version: "1.33"
 pod_network_cidr: "10.244.0.0/16"
 primary_master: "{{ groups['masters'][0] }}"
 cluster_endpoint: "{{ groups['masters'][0] }}" 
