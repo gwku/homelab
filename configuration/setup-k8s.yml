@@ -346,24 +346,24 @@
         path: /etc/kubernetes/kubelet.conf
       register: kubelet_conf_exists
 
-    - name: Get fresh certificate key from primary master
-      shell: kubeadm init phase upload-certs --upload-certs | tail -1
-      register: cert_key
-      delegate_to: "{{ primary_master }}"
-      become: yes
-      when: not kubelet_conf_exists.stat.exists
-
-    - name: Generate control plane join command from primary master
-      shell: |
-        kubeadm token create --print-join-command --ttl 30m
-      register: cp_join_cmd
-      delegate_to: "{{ primary_master }}"
-      become: yes
-      when: not kubelet_conf_exists.stat.exists
-
     - name: Join master to cluster as control plane
-      shell: |
-        {{ cp_join_cmd.stdout }} --control-plane --certificate-key {{ cert_key.stdout }}
+      block:
+        - name: Get fresh certificate key from primary master
+          shell: kubeadm init phase upload-certs --upload-certs | tail -1
+          register: cert_key
+          delegate_to: "{{ primary_master }}"
+          become: yes
+
+        - name: Generate control plane join command from primary master
+          shell: |
+            kubeadm token create --print-join-command --ttl 30m
+          register: cp_join_cmd
+          delegate_to: "{{ primary_master }}"
+          become: yes
+
+        - name: Execute join command
+          shell: |
+            {{ cp_join_cmd.stdout }} --control-plane --certificate-key {{ cert_key.stdout }}
       when: not kubelet_conf_exists.stat.exists and groups['masters'] | length > 1
 
     - name: Setup kubeconfig for additional masters
