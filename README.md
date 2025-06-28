@@ -95,7 +95,7 @@ homelab/
 │   ├── main.tf                       # Main Terraform configuration
 │   ├── variables.tf                  # Variable declarations
 │   ├── terraform.example.tfvars      # Example configuration
-│   ├── resources/k8s-cluster/        # Kubernetes cluster module
+│   ├── modules/k8s-cluster/        # Kubernetes cluster module
 │   ├── scripts/                      # Infrastructure automation scripts
 │   └── README.md                     # Infrastructure documentation
 └── configuration/                     # Configuration management

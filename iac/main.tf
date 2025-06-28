@@ -1,6 +1,6 @@
 # Create VMs using k8s-cluster module
 module "k8s_cluster" {
-  source = "./resources/k8s-cluster"
+  source = "./modules/k8s-cluster"
 
   pm_api_url          = var.pm_api_url
   pm_api_token_id     = var.pm_api_token_id

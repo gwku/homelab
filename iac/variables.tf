@@ -14,6 +14,11 @@ variable "pm_api_token_secret" {
   sensitive   = true
 }
 
+variable "pm_tls_insecure" {
+  description = "Proxmox TLS insecure"
+  type        = bool
+}
+
 variable "vm_id_start" {
   description = "Starting VM ID for incremental assignment (e.g., 100 will create VMs with IDs 100, 101, 102, etc.)"
   type        = number
