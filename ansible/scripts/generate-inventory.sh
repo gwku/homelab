@@ -7,22 +7,24 @@ set -e
 
 # Default paths
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-INFRASTRUCTURE_DIR="$(dirname "$SCRIPT_DIR")"
-CONFIG_DIR="$(dirname "$INFRASTRUCTURE_DIR")/configuration"
+ANSIBLE_DIR="$(dirname "$SCRIPT_DIR")"
+PROJECT_ROOT="$(dirname "$ANSIBLE_DIR")"
+IAC_DIR="$PROJECT_ROOT/iac"
+CONFIG_DIR="$PROJECT_ROOT/ansible"
 DEFAULT_OUTPUT_FILE="$CONFIG_DIR/inventory.ini"
 
 # Allow custom output file as argument
 OUTPUT_FILE="${1:-$DEFAULT_OUTPUT_FILE}"
 
 # SSH key path - will extract from existing inventory or use default
-SSH_KEY_PATH="/Users/gerwin/.ssh/id_rsa"
+SSH_KEY_PATH="$HOME/.ssh/id_rsa"
 
 echo "Generating Ansible inventory from tofu state..."
-echo "Infrastructure directory: $INFRASTRUCTURE_DIR"
+echo "Infrastructure directory: $IAC_DIR"
 echo "Output file: $OUTPUT_FILE"
 
 # Change to infrastructure directory
-cd "$INFRASTRUCTURE_DIR"
+cd "$IAC_DIR"
 
 # Check if tofu is available and state exists
 if ! command -v tofu &> /dev/null; then
@@ -30,8 +32,8 @@ if ! command -v tofu &> /dev/null; then
     exit 1
 fi
 
-if [ ! -f "terraform.tfstate" ] && [ ! -f ".terraform/terraform.tfstate" ]; then
-    echo "Error: No terraform state found. Please run 'tofu apply' first."
+if [ ! -f "terraform.tfstate" ]; then
+    echo "Error: No terraform state found in $IAC_DIR. Please run 'tofu apply' first."
     exit 1
 fi
 
