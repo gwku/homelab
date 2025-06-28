@@ -6,7 +6,7 @@ primary_master: "{{ groups['masters'][0] }}"
 cluster_endpoint: "{{ groups['masters'][0] }}"
 
 # GitHub configuration for Flux
-github_owner: "your-github-username"  # Your GitHub username or organization
+flux_github_owner: "your-github-username"  # Your GitHub username or organization
 flux_repository: "repository"        # The repository to create for Flux
 flux_branch: "main"
 flux_path: "gitops/clusters/production"

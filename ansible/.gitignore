@@ -1,0 +1,13 @@
+# Local variable overrides
+vars.local.yml
+
+# Ansible retry files
+*.retry
+
+# Ansible vault password file
+.vault_pass
+
+# Other common files to ignore
+*.swp
+*.swo
+*~ 
