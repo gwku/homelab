@@ -1,47 +1,243 @@
-# Kubernetes Cluster Infrastructure
+# Kubernetes Cluster Infrastructure with k3s
 
-This OpenTofu configuration creates a Kubernetes cluster on Proxmox VE using cloud-init enabled VMs.
+This Terraform/Tofu configuration creates a highly available Kubernetes cluster on Proxmox VE using k3s.
 
-## Setup
+## Features
 
-1. **Copy the example configuration file:**
+- **Multi-node k3s cluster**: Creates master and worker nodes with automatic k3s installation
+- **High Availability**: Supports multiple master nodes for HA configuration
+- **Automated Setup**: Complete cluster setup from VM creation to k3s installation
+- **Load Balancing**: Distributes VMs across multiple Proxmox nodes
+- **Secure**: Uses SSH keys for authentication and generates secure k3s tokens
+- **Configurable**: Flexible VM sizing and cluster topology
+
+## Prerequisites
+
+- Proxmox VE server with API access
+- Cloud-init enabled VM template (e.g., Ubuntu 20.04/22.04 or Debian 11/12)
+- SSH key pair for VM access
+- Terraform/Tofu installed
+
+## Quick Start
+
+1. **Clone and Configure**:
    ```bash
    cp terraform.example.tfvars terraform.tfvars
    ```
 
-2. **Edit `terraform.tfvars` with your actual values:**
-   - Update Proxmox API credentials
-   - Set your SSH public key
-   - Adjust VM specifications as needed
-
-3. **Initialize OpenTofu:**
-   ```bash
-   tofu init
+2. **Edit Configuration**:
+   Update `terraform.tfvars` with your environment settings:
+   ```hcl
+   # Proxmox Configuration
+   pm_api_url          = "https://your-proxmox-server:8006/api2/json"
+   pm_api_token_id     = "your-user@pve!token-name"
+   pm_api_token_secret = "your-token-secret"
+   
+   # SSH Configuration
+   ssh_keys = "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAAB..."
+   ssh_private_key = "-----BEGIN OPENSSH PRIVATE KEY-----\n...\n-----END OPENSSH PRIVATE KEY-----"
+   
+   # Network Configuration
+   ip_prefix = "192.168.1"
+   ip_start  = 10
+   gateway   = "192.168.1.1"
+   
+   # Cluster Configuration
+   vms = {
+     master = {
+       count       = 3
+       cores       = 2
+       sockets     = 1
+       memory      = 4096
+       disk_size   = "50G"
+       name_prefix = "k8s-master"
+     }
+     worker = {
+       count       = 3
+       cores       = 4
+       sockets     = 1
+       memory      = 8192
+       disk_size   = "100G"
+       name_prefix = "k8s-worker"
+     }
+   }
    ```
 
-4. **Plan and apply:**
+3. **Deploy the Cluster**:
    ```bash
+   tofu init
    tofu plan
    tofu apply
    ```
 
-## Configuration Files
+## Cluster Architecture
 
-- `terraform.example.tfvars` - Example/default values (committed to git)
-- `terraform.tfvars` - Your actual values (excluded from git)
-- `variables.tf` - Variable declarations
+### k3s Installation Process
 
-## VM Configuration
+1. **First Master Node**: Initializes the cluster with `--cluster-init`
+2. **Additional Masters**: Join the cluster as additional server nodes
+3. **Worker Nodes**: Join as agent nodes
+4. **Kubeconfig**: Automatically retrieved and configured
 
-The cluster consists of:
-- **Master nodes**: Control plane nodes (default: 2 nodes, 4 cores, 4GB RAM)
-- **Worker nodes**: Application workload nodes (default: 3 nodes, 2 cores, 2GB RAM)
+### Network Configuration
 
-You can customize the VM configuration by modifying the `vms` variable in your `terraform.tfvars` file.
+- **Master Nodes**: Get IPs starting from `${ip_prefix}.${ip_start}`
+- **Worker Nodes**: Get IPs starting after master nodes
+- **Load Balancer**: k3s built-in load balancer for HA masters
+
+## Configuration Options
+
+### VM Types
+
+The `vms` variable supports flexible cluster topologies:
+
+```hcl
+vms = {
+  master = {
+    count       = 3        # Number of master nodes
+    cores       = 2        # CPU cores per node
+    sockets     = 1        # CPU sockets per node
+    memory      = 4096     # RAM in MB
+    disk_size   = "50G"    # Disk size
+    name_prefix = "k8s-master"
+  }
+  worker = {
+    count       = 3
+    cores       = 4
+    sockets     = 1
+    memory      = 8192
+    disk_size   = "100G"
+    name_prefix = "k8s-worker"
+  }
+}
+```
+
+### SSH Configuration
+
+Configure SSH access using your private key content:
+
+```hcl
+ssh_private_key = <<EOF
+-----BEGIN OPENSSH PRIVATE KEY-----
+your-private-key-content-here
+-----END OPENSSH PRIVATE KEY-----
+EOF
+```
+
+The private key content is used for all SSH connections during k3s installation and kubeconfig retrieval.
+
+## Accessing the Cluster
+
+### Automatic Kubeconfig
+
+The configuration automatically:
+- Downloads kubeconfig from the first master node
+- Configures it with the correct server IP
+- Saves it to `~/.kube/config`
+
+### Manual Kubeconfig Retrieval
+
+If needed, you can manually retrieve the kubeconfig:
+
+```bash
+# Get the kubeconfig command from output
+tofu output kubeconfig_command
+
+# Or manually:
+scp user@master-ip:/etc/rancher/k3s/k3s.yaml ~/.kube/config
+sed -i 's/127.0.0.1/MASTER-IP/g' ~/.kube/config
+```
+
+### Cluster Information
+
+View cluster details:
+```bash
+# Get cluster endpoint
+tofu output cluster_endpoint
+
+# Get node IPs
+tofu output master_ips
+tofu output worker_ips
+
+# Get k3s token (sensitive)
+tofu output k3s_token
+```
+
+## Verification
+
+After deployment, verify the cluster:
+
+```bash
+# Check cluster status
+kubectl get nodes
+
+# Check all nodes are ready
+kubectl get nodes -o wide
+
+# Check k3s system pods
+kubectl get pods -n kube-system
+```
+
+## Troubleshooting
+
+### Common Issues
+
+1. **SSH Connection Failures**:
+   - Verify SSH keys are correct
+   - Check network connectivity
+   - Ensure cloud-init has completed
+
+2. **k3s Installation Failures**:
+   - Check VM internet connectivity
+   - Verify sufficient resources
+   - Review logs: `journalctl -u k3s`
+
+3. **Node Not Joining**:
+   - Verify k3s token
+   - Check network connectivity between nodes
+   - Review agent logs: `journalctl -u k3s-agent`
+
+### Logs
+
+Check k3s logs on nodes:
+```bash
+# Master node
+sudo journalctl -u k3s -f
+
+# Worker node
+sudo journalctl -u k3s-agent -f
+```
+
+## Customization
+
+### k3s Configuration
+
+The installation uses these k3s flags:
+- `--cluster-init`: Initialize embedded etcd on first master
+- `--flannel-iface=eth0`: Use eth0 for flannel CNI
+- `--node-external-ip`: Set external IP for node
+- `--server`: Join additional masters to cluster
+
+### Advanced Configuration
+
+For custom k3s configuration, modify the provisioner scripts in:
+- `modules/k8s-cluster/main.tf`
 
 ## Security
 
-- Never commit `terraform.tfvars` containing real credentials
-- Use strong passwords for API access and cloud-init user
-- Rotate SSH keys regularly
-- Keep OpenTofu state files secure 
+- All SSH communications use private keys
+- k3s tokens are generated securely and marked as sensitive
+- Network traffic is contained within the specified IP range
+- Cloud-init passwords are marked as sensitive
+
+## Cleanup
+
+To destroy the cluster:
+```bash
+tofu destroy
+```
+
+This will:
+1. Remove all VMs
+2. Clean up associated resources
+3. Preserve the original VM template 

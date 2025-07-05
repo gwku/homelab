@@ -26,4 +26,34 @@ module "k8s_cluster" {
   ciuser     = var.ciuser
   cipassword = var.cipassword
   ssh_keys   = var.ssh_keys
+  
+  # SSH Configuration for k3s installation
+  ssh_private_key = var.ssh_private_key
+}
+
+# Output values from the k3s cluster module
+output "master_ips" {
+  description = "IP addresses of the master nodes"
+  value       = module.k8s_cluster.master_ips
+}
+
+output "worker_ips" {
+  description = "IP addresses of the worker nodes"
+  value       = module.k8s_cluster.worker_ips
+}
+
+output "k3s_token" {
+  description = "k3s cluster token (sensitive)"
+  value       = module.k8s_cluster.k3s_token
+  sensitive   = true
+}
+
+output "kubeconfig_command" {
+  description = "Command to get the kubeconfig file"
+  value       = module.k8s_cluster.kubeconfig_command
+}
+
+output "cluster_endpoint" {
+  description = "k3s cluster endpoint"
+  value       = module.k8s_cluster.cluster_endpoint
 }

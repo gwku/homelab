@@ -25,6 +25,14 @@ gateway   = "192.168.2.254"
 # SSH Keys for VM access
 ssh_keys = "your-ssh-public-key-here"
 
+# SSH Private Key for k3s installation
+# Paste your private key content here
+ssh_private_key = <<EOF
+-----BEGIN OPENSSH PRIVATE KEY-----
+your-private-key-content-here
+-----END OPENSSH PRIVATE KEY-----
+EOF
+
 # Kubernetes Cluster Configuration
 # Default configuration provides 3 masters + 3 workers
 # Masters will be distributed: master-1 (node1), master-2 (node2), master-3 (node1)

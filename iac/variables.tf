@@ -61,6 +61,12 @@ variable "ssh_keys" {
   type        = string
 }
 
+variable "ssh_private_key" {
+  description = "SSH private key content for provisioner connections"
+  type        = string
+  sensitive   = true
+}
+
 variable "ip_prefix" {
   description = "IP prefix for static IP assignment (e.g., '192.168.1')"
   type        = string
