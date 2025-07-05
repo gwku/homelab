@@ -31,7 +31,7 @@ spec:
       http:
         enabled: true
         port: 81
-      type: LoadBalancer
+      type: ClusterIP
     
     # Persistent storage
     persistentVolumeClaim:
