@@ -1,12 +1,14 @@
 # Kubernetes Cluster Infrastructure with k3s
 
-This Terraform/Tofu configuration creates a highly available Kubernetes cluster on Proxmox VE using k3s.
+This Terraform/Tofu configuration creates a highly available Kubernetes cluster on Proxmox VE using k3s and automatically bootstraps GitOps with Flux.
 
 ## Features
 
 - **Multi-node k3s cluster**: Creates master and worker nodes with automatic k3s installation
 - **High Availability**: Supports multiple master nodes for HA configuration
-- **Automated Setup**: Complete cluster setup from VM creation to k3s installation
+- **GitOps Ready**: Automatically bootstraps Flux for GitOps workflow
+- **GitHub Integration**: Creates and configures GitHub repository for GitOps
+- **Automated Setup**: Complete cluster setup from VM creation to GitOps bootstrap
 - **Load Balancing**: Distributes VMs across multiple Proxmox nodes
 - **Secure**: Uses SSH keys for authentication and generates secure k3s tokens
 - **Configurable**: Flexible VM sizing and cluster topology
@@ -16,6 +18,7 @@ This Terraform/Tofu configuration creates a highly available Kubernetes cluster 
 - Proxmox VE server with API access
 - Cloud-init enabled VM template (e.g., Ubuntu 20.04/22.04 or Debian 11/12)
 - SSH key pair for VM access
+- GitHub account with Personal Access Token
 - Terraform/Tofu installed
 
 ## Quick Start
@@ -41,6 +44,12 @@ This Terraform/Tofu configuration creates a highly available Kubernetes cluster 
    ip_prefix = "192.168.1"
    ip_start  = 10
    gateway   = "192.168.1.1"
+   
+   # GitHub/GitOps Configuration
+   github_org          = "your-github-username"
+   github_repository   = "homelab-gitops"
+   github_token        = "ghp_your-personal-access-token"
+   flux_cluster_path   = "clusters/production"
    
    # Cluster Configuration
    vms = {
@@ -69,6 +78,86 @@ This Terraform/Tofu configuration creates a highly available Kubernetes cluster 
    tofu plan
    tofu apply
    ```
+
+## GitOps with Flux
+
+This configuration automatically sets up GitOps using Flux:
+
+### What Gets Created
+
+1. **GitHub Repository**: A private repository for your GitOps manifests
+2. **Flux Bootstrap**: Flux controllers installed in the `flux-system` namespace
+3. **Git Integration**: Flux configured to monitor your GitHub repository
+4. **Cluster Manifests**: Initial cluster configuration stored in Git
+
+### Repository Structure
+
+After bootstrap, your GitHub repository will contain:
+```
+clusters/
+└── production/
+    └── flux-system/
+        ├── gotk-components.yaml
+        ├── gotk-sync.yaml
+        └── kustomization.yaml
+```
+
+### Managing Your Cluster
+
+1. **Add Applications**: Place Kubernetes manifests in your repository
+2. **Flux Sync**: Flux automatically applies changes from Git
+3. **Git Workflow**: Use pull requests for cluster changes
+
+### Example Application Deployment
+
+Add a new application to your repository:
+```yaml
+# apps/my-app/namespace.yaml
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: my-app
+
+---
+# apps/my-app/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: my-app
+  namespace: my-app
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: my-app
+  template:
+    metadata:
+      labels:
+        app: my-app
+    spec:
+      containers:
+      - name: my-app
+        image: nginx:latest
+        ports:
+        - containerPort: 80
+```
+
+Then create a Kustomization to deploy it:
+```yaml
+# clusters/production/my-app.yaml
+apiVersion: kustomize.toolkit.fluxcd.io/v1beta2
+kind: Kustomization
+metadata:
+  name: my-app
+  namespace: flux-system
+spec:
+  interval: 10m
+  path: "./apps/my-app"
+  prune: true
+  sourceRef:
+    kind: GitRepository
+    name: flux-system
+```
 
 ## Cluster Architecture
 

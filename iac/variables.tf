@@ -95,3 +95,26 @@ variable "vms" {
     name_prefix = string
   }))
 }
+
+# GitHub/GitOps Configuration Variables
+variable "github_org" {
+  description = "GitHub organization or username"
+  type        = string
+}
+
+variable "github_repository" {
+  description = "GitHub repository name for GitOps"
+  type        = string
+}
+
+variable "github_token" {
+  description = "GitHub personal access token for GitOps"
+  type        = string
+  sensitive   = true
+}
+
+variable "flux_cluster_path" {
+  description = "Path in the Git repository for this cluster's manifests"
+  type        = string
+  default     = "clusters/production"
+}

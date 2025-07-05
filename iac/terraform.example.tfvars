@@ -54,4 +54,11 @@ vms = {
     disk_size   = "100G"
     name_prefix = "k8s-worker"
   }
-} 
+}
+
+# GitHub/GitOps Configuration
+# Update these values for your GitHub repository and token
+github_org          = "your-github-username-or-org"
+github_repository   = "homelab-gitops"
+github_token        = "your-github-personal-access-token"
+flux_cluster_path   = "clusters/production"  # Path in your Git repository for this cluster 

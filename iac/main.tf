@@ -57,3 +57,16 @@ output "cluster_endpoint" {
   description = "k3s cluster endpoint"
   value       = module.k8s_cluster.cluster_endpoint
 }
+
+# ==========================================
+# Bootstrap k3s cluster with Flux
+# ==========================================
+
+resource "flux_bootstrap_git" "k3s_cluster" {
+  depends_on = [
+    module.k8s_cluster
+  ]
+
+  embedded_manifests = true
+  path               = var.flux_cluster_path
+}
